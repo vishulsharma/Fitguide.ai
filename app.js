@@ -45,16 +45,41 @@ async function setupCamera(front = true) {
   els.video.play();
   els.canvas.width = els.video.videoWidth;
   els.canvas.height = els.video.videoHeight;
+
+  // Apply mirror transform for front camera only (so it acts like a mirror)
+  // Back camera should not be mirrored
+  const mirrorTransform = front ? 'scaleX(-1)' : 'scaleX(1)';
+  els.video.style.transform = mirrorTransform;
+  els.canvas.style.transform = mirrorTransform;
+
   els.status.textContent = 'Camera ready.';
 }
 
 async function loadModel() {
+  els.status.textContent = 'Loading pose detection model…';
+  try {
+    // Try BlazePose first (generally more accurate for full body)
+    if (poseDetection.SupportedModels.BlazePose) {
+      els.status.textContent = 'Loading BlazePose model…';
+      const model = poseDetection.SupportedModels.BlazePose;
+      detector = await poseDetection.createDetector(model, {
+        runtime: 'mediapipe', // or 'tfjs' for TensorFlow.js backend
+      });
+      els.status.textContent = 'BlazePose model loaded.';
+      return;
+    }
+  } catch (err) {
+    console.warn('BlazePose not available or failed to load:', err.message);
+    els.status.textContent = 'BlazePose unavailable, trying MoveNet…';
+  }
+
+  // Fall back to MoveNet
   els.status.textContent = 'Loading MoveNet model…';
   const model = poseDetection.SupportedModels.MoveNet;
   detector = await poseDetection.createDetector(model, {
     modelType: poseDetection.movenet.modelType.SINGLEPOSE_FULL,
   });
-  els.status.textContent = 'Model ready.';
+  els.status.textContent = 'MoveNet model ready.';
 }
 
 /* ---------------- Angle math ---------------- */
@@ -200,18 +225,32 @@ els.saveBtn.addEventListener('click', () => {
   renderHistory();
 });
 
-cameraToggleBtn.addEventListener('click', () => {
+cameraToggleBtn.addEventListener('click', async () => {
   useFrontCamera = !useFrontCamera;
-  // If currently running, restart camera with new facing mode
+  // If currently running, restart camera immediately with new facing mode
   if (running) {
-    // stop and start
-    running = false;
-    cancelAnimationFrame(rafId);
-    stopTimer();
-    els.startBtn.textContent = 'Start';
-    // Note: actual restart will happen when user presses Start again.
-    // For immediate restart, we could reinitialize, but keep simple.
-    els.status.textContent = `Camera will switch to ${useFrontCamera ? 'front' : 'back'} on next start.`;
+    // Stop current camera stream
+    const oldStream = els.video.srcObject;
+    if (oldStream) {
+      oldStream.getTracks().forEach(track => track.stop());
+    }
+
+    // Restart with new facing mode
+    try {
+      els.status.textContent = 'Switching camera…';
+      await setupCamera(useFrontCamera);
+      els.status.textContent = 'Camera switched.';
+      // Continue with existing detector and tracking state
+    } catch (err) {
+      els.status.textContent = 'Error switching camera: ' + err.message;
+      // Try to recover with original facing mode
+      useFrontCamera = !useFrontCamera; // revert toggle
+      try {
+        await setupCamera(useFrontCamera);
+      } catch (e) {
+        els.status.textContent = 'Camera recovery failed: ' + e.message;
+      }
+    }
   } else {
     els.status.textContent = `Camera set to ${useFrontCamera ? 'front' : 'back'}`;
   }
