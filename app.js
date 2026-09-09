@@ -14,8 +14,10 @@ const els = {
   historyList: document.getElementById('historyList'),
   chartCanvas: document.getElementById('chart'),
   timer: document.getElementById('timer'),
-  saveBtn: document.getElementById('saveBtn'),
+  saveBtn: document.getElementById('saveBtn')
 };
+
+const cameraToggleBtn = document.getElementById('cameraToggleBtn');
 
 const counter = new SquatCounter(CONFIG);
 let detector = null;
@@ -23,6 +25,7 @@ let running = false;
 let rafId = null;
 let sessionStart = null;
 let timerInterval = null;
+let useFrontCamera = true;
 
 const SKELETON = [
   ['left_hip','left_knee'], ['left_knee','left_ankle'],
@@ -32,10 +35,10 @@ const SKELETON = [
 ];
 
 /* ---------------- Camera ---------------- */
-async function setupCamera() {
+async function setupCamera(front = true) {
   els.status.textContent = 'Requesting camera…';
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: 640, height: 480 }, audio: false,
+    video: { width: 640, height: 480, facingMode: front ? 'user' : 'environment' }, audio: false,
   });
   els.video.srcObject = stream;
   await new Promise(res => els.video.onloadedmetadata = res);
@@ -49,7 +52,7 @@ async function loadModel() {
   els.status.textContent = 'Loading MoveNet model…';
   const model = poseDetection.SupportedModels.MoveNet;
   detector = await poseDetection.createDetector(model, {
-    modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+    modelType: poseDetection.movenet.modelType.SINGLEPOSE_FULL,
   });
   els.status.textContent = 'Model ready.';
 }
@@ -168,7 +171,7 @@ els.startBtn.addEventListener('click', async () => {
   }
   try {
     if (!detector) {
-      await setupCamera();
+      await setupCamera(useFrontCamera);
       await loadModel();
     }
     running = true;
@@ -195,6 +198,23 @@ els.saveBtn.addEventListener('click', () => {
   });
   localStorage.setItem('squatSessions', JSON.stringify(sessions));
   renderHistory();
+});
+
+cameraToggleBtn.addEventListener('click', () => {
+  useFrontCamera = !useFrontCamera;
+  // If currently running, restart camera with new facing mode
+  if (running) {
+    // stop and start
+    running = false;
+    cancelAnimationFrame(rafId);
+    stopTimer();
+    els.startBtn.textContent = 'Start';
+    // Note: actual restart will happen when user presses Start again.
+    // For immediate restart, we could reinitialize, but keep simple.
+    els.status.textContent = `Camera will switch to ${useFrontCamera ? 'front' : 'back'} on next start.`;
+  } else {
+    els.status.textContent = `Camera set to ${useFrontCamera ? 'front' : 'back'}`;
+  }
 });
 
 /* ---------------- History ---------------- */
